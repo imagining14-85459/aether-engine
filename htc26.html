@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Aether Archive: Mycelium Melee</title>
+    <style>
+        :root { --mana: #00f3ff; --chaos: #bc13fe; --hp: #ff4757; }
+        body { margin: 0; background: #050508; color: #fff; font-family: 'Courier New', monospace; overflow: hidden; }
+        canvas { position: fixed; top: 0; left: 0; }
+        #bg-canvas { z-index: -2; opacity: 0.4; }
+        #battle-canvas { z-index: -1; }
+        
+        #ui-layer {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 600px; background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(10px); border: 1px solid var(--mana);
+            padding: 20px; border-radius: 15px; text-align: center;
+        }
+
+        .hp-label { position: fixed; top: 50px; width: 200px; text-align: center; font-weight: bold; }
+        .bar-wrap { height: 10px; background: #222; border-radius: 5px; overflow: hidden; border: 1px solid #444; }
+        .fill { height: 100%; width: 100%; transition: 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28); }
+
+        button {
+            width: 48%; padding: 12px; margin: 5px 1%; background: rgba(0, 243, 255, 0.1);
+            border: 1px solid var(--mana); color: #fff; cursor: pointer; border-radius: 5px;
+        }
+        button:hover { background: var(--mana); color: #000; box-shadow: 0 0 15px var(--mana); }
+    </style>
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    <canvas id="battle-canvas"></canvas>
+
+    <div class="hp-label" style="left: 10%;">PLAYER<div class="bar-wrap"><div id="p-hp" class="fill" style="background:var(--mana)"></div></div></div>
+    <div class="hp-label" style="right: 10%;">GUARDIAN<div class="bar-wrap"><div id="e-hp" class="fill" style="background:var(--hp)"></div></div></div>
+
+    <div id="ui-layer">
+        <div id="seismic-readout" style="color:var(--chaos); font-size: 12px;">CHAOS: 0.00</div>
+        <div id="narrative" style="font-size: 11px; color: #888; margin: 10px 0;">The Archive hums with ancient power...</div>
+        <div id="quiz-zone">
+            <h3 id="q-text">Establish a link to begin.</h3>
+            <div id="opt-grid"></div>
+        </div>
+        <button id="start-btn" onclick="startRitual()" style="width:100%; background:var(--mana); color:#000;">BOOT SYSTEMS</button>
+    </div>
+
+    <script type="module">
+        import init, { AetherEngine } from './pkg/aether_archive.js';
+        let engine, bgCtx, btCtx, w, h, API_KEY = "YOUR_GEMINI_KEY";
+        let pPos = { x: 150, y: 0 }, ePos = { x: 0, y: 0 };
+        let particles = [];
+
+        async function startRitual() {
+            await init();
+            engine = new AetherEngine();
+            setup();
+            if (DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission();
+            window.addEventListener('devicemotion', e => engine.update_seismic(e.acceleration.x || 0, e.acceleration.y || 0, e.acceleration.z || 0));
+            document.getElementById('start-btn').style.display = 'none';
+            loop();
+            getTrial();
+        }
+
+        function setup() {
+            w = window.innerWidth; h = window.innerHeight;
+            const bg = document.getElementById('bg-canvas'); bg.width = w; bg.height = h; bgCtx = bg.getContext('2d');
+            const bt = document.getElementById('battle-canvas'); bt.width = w; bt.height = h; btCtx = bt.getContext('2d');
+            pPos.y = ePos.y = h / 2; ePos.x = w - 150;
+        }
+
+        function loop() {
+            requestAnimationFrame(loop);
+            const chaos = engine.get_chaos();
+            document.getElementById('seismic-readout').innerText = `SEISMIC CHAOS: ${chaos.toFixed(2)}`;
+
+            // 1. Mycelium Background
+            bgCtx.fillStyle = 'rgba(5, 5, 8, 0.05)'; bgCtx.fillRect(0, 0, w, h);
+            bgCtx.strokeStyle = `rgba(0, 243, 255, ${Math.min(chaos/10, 1)})`;
+            bgCtx.beginPath(); bgCtx.moveTo(w/2, h); bgCtx.lineTo(w/2 + (Math.random()-0.5)*200, h/2); bgCtx.stroke();
+
+            // 2. Battle Layer
+            btCtx.clearRect(0, 0, w, h);
+            btCtx.font = "80px Arial";
+            // Draw Characters with Hover effect
+            btCtx.fillText("🧙‍♂️", pPos.x - 40, pPos.y + Math.sin(Date.now()/500)*15);
+            btCtx.fillText("👾", ePos.x - 40, ePos.y + Math.cos(Date.now()/400)*20);
+
+            // Particles
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy; p.alpha -= 0.02;
+                btCtx.fillStyle = `rgba(${p.c}, ${p.alpha})`;
+                btCtx.fillRect(p.x, p.y, p.s, p.s);
+                if(p.alpha <= 0) particles.splice(i, 1);
+            });
+        }
+
+        async function getTrial() {
+            const chaos = engine.get_chaos();
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ contents: [{ parts: [{ text: `Topic: CS. Chaos: ${chaos}. JSON: {q:"...", o:["","",""], a:0, n:"..."}` }] }] })
+            });
+            const data = await res.json();
+            const quiz = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/g, ""));
+            document.getElementById('q-text').innerText = quiz.q;
+            document.getElementById('narrative').innerText = quiz.n;
+            const grid = document.getElementById('opt-grid'); grid.innerHTML = "";
+            quiz.o.forEach((opt, i) => {
+                const b = document.createElement('button'); b.innerText = opt;
+                b.onclick = () => {
+                    const combat = engine.handle_combat(i === quiz.a).split('|');
+                    document.getElementById('e-hp').style.width = combat[2] + "%";
+                    // Spawn particles toward enemy on win
+                    for(let k=0; k<15; k++) particles.push({x:pPos.x, y:pPos.y, vx:5+Math.random()*10, vy:(Math.random()-0.5)*5, alpha:1, s:4, c:"0, 243, 255"});
+                    getTrial();
+                };
+                grid.appendChild(b);
+            });
+        }
+        window.startRitual = startRitual;
+    </script>
+</body>
+</html>
